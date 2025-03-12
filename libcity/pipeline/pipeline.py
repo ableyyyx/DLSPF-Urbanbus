@@ -1,10 +1,15 @@
 import os
 from ray import tune
-from ray.tune.suggest.hyperopt import HyperOptSearch
-from ray.tune.suggest.bayesopt import BayesOptSearch
-from ray.tune.suggest.basic_variant import BasicVariantGenerator
+# from ray.tune.suggest.hyperopt import HyperOptSearch
+from ray.tune.search.hyperopt import HyperOptSearch
+# from ray.tune.suggest.bayesopt import BayesOptSearch
+from ray.tune.search.bayesopt import BayesOptSearch
+# from ray.tune.suggest.basic_variant import BasicVariantGenerator
+from ray.tune.search.basic_variant import BasicVariantGenerator
 from ray.tune.schedulers import FIFOScheduler, ASHAScheduler, MedianStoppingRule
-from ray.tune.suggest import ConcurrencyLimiter
+# from ray.tune.suggest import ConcurrencyLimiter
+from ray.tune.search import ConcurrencyLimiter
+
 import json
 import torch
 import random
