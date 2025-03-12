@@ -51,7 +51,10 @@ class Batch(object):
             if self.feature_name[key] == 'int':
                 self.data[key] = torch.LongTensor(np.array(self.data[key])).to(device)
             elif self.feature_name[key] == 'float':
-                self.data[key] = torch.FloatTensor(np.array(self.data[key])).to(device)
+                # 显式转换为float32类型
+                arr = np.array(self.data[key], dtype=np.float16)
+                self.data[key] = torch.FloatTensor(arr).to(device)
+                # self.data[key] = torch.FloatTensor(np.array(self.data[key])).to(device)
             else:
                 raise TypeError(
                     'Batch to_tensor, only support int, float but you give {}'.format(self.feature_name[key]))
