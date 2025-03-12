@@ -5,7 +5,7 @@ import copy
 from datetime import datetime
 import numpy as np
 from collections import defaultdict
-from torchtext.data import Field
+from torchtext.vocab import build_vocab_from_iterator
 from nltk import ngrams
 from tqdm import tqdm
 from libcity.data.dataset import AbstractDataset
@@ -299,14 +299,19 @@ class GeoSANDataset(AbstractDataset):
             self.loc2quadkey.append(quadkey_bigram)
             all_quadkeys.append(quadkey_bigram)
 
-        self.QUADKEY = Field(
-            sequential=True,
-            use_vocab=True,
-            batch_first=True,
-            unk_token=None,
-            preprocessing=str.split
-        )
-        self.QUADKEY.build_vocab(all_quadkeys)
+        vocab = build_vocab_from_iterator(all_quadkeys, specials=["<pad>"])
+        vocab.set_default_index(vocab["<pad>"])
+
+        class CustomField:
+            def __init__(self, vocab):
+                self.vocab = vocab
+                self.itos = vocab.get_itos()
+
+            def numericalize(self, quadkeys):
+                return [self.vocab[quadkey] for quadkey in quadkeys]
+
+        # 使用 CustomField 替代 Field
+        self.QUADKEY = CustomField(vocab)
 
         return user_seq_array, user2idx, region2idx, n_users, n_region, regidx2loc, 169
 
