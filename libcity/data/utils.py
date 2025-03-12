@@ -50,13 +50,37 @@ def generate_dataloader(train_data, eval_data, test_data, feature_name,
             eval_dataloader: Dataloader composed of Batch (class) \n
             test_dataloader: Dataloader composed of Batch (class)
     """
+    # 改进的标准化数据形状函数
+    def standardize_shape(data):
+        # 找到最大长度
+        max_length = max(len(np.array(item, dtype=object)) for item in data)
+        standardized_data = []
+
+        for item in data:
+            item_array = np.array(item, dtype=object)
+            # 如果 item 的长度小于 max_length，用 0 填充
+            if len(item_array) < max_length:
+                padding = [0] * (max_length - len(item_array))
+                item_array = np.concatenate([item_array, padding])
+            standardized_data.append(item_array)
+
+        return np.array(standardized_data, dtype=object)
+    
     if pad_with_last_sample:
+        # 标准化数据形状
+        train_data = standardize_shape(train_data)
+        eval_data = standardize_shape(eval_data)
+        test_data = standardize_shape(test_data)
+
+        # 进行数据填充
         num_padding = (batch_size - (len(train_data) % batch_size)) % batch_size
         data_padding = np.repeat(train_data[-1:], num_padding, axis=0)
         train_data = np.concatenate([train_data, data_padding], axis=0)
+
         num_padding = (batch_size - (len(eval_data) % batch_size)) % batch_size
         data_padding = np.repeat(eval_data[-1:], num_padding, axis=0)
         eval_data = np.concatenate([eval_data, data_padding], axis=0)
+
         num_padding = (batch_size - (len(test_data) % batch_size)) % batch_size
         data_padding = np.repeat(test_data[-1:], num_padding, axis=0)
         test_data = np.concatenate([test_data, data_padding], axis=0)
