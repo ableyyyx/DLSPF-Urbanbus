@@ -265,23 +265,34 @@ class TrafficStateDataset(AbstractDataset):
             dynafile = dynafile[data_col]
         else:  # 不指定则加载所有列
             dynafile = dynafile[dynafile.columns[2:]]  # 从time列开始所有列
-        # 求时间序列
-        self.timesolts = list(dynafile['time'][:int(dynafile.shape[0] / len(self.geo_ids))])
+
+        # 计算每个节点的正确时间步数
+        num_nodes = len(self.geo_ids)
+        total_samples = dynafile.shape[0]
+        len_time = total_samples // num_nodes
+        if total_samples % num_nodes != 0:
+            raise ValueError(f".dyna文件的行数{total_samples}无法被节点数{num_nodes}整除，请检查数据完整性。")
+
+        # 确保时间戳数量正确
+        self.timesolts = list(dynafile['time'].unique()[:len_time])
         self.idx_of_timesolts = dict()
-        if not dynafile['time'].isna().any():  # 时间没有空值
+        if not dynafile['time'].isna().any():
             self.timesolts = list(map(lambda x: x.replace('T', ' ').replace('Z', ''), self.timesolts))
             self.timesolts = np.array(self.timesolts, dtype='datetime64[ns]')
             for idx, _ts in enumerate(self.timesolts):
                 self.idx_of_timesolts[_ts] = idx
+
         # 转3-d数组
         feature_dim = len(dynafile.columns) - 2
         df = dynafile[dynafile.columns[-feature_dim:]]
-        len_time = len(self.timesolts)
         data = []
-        for i in range(0, df.shape[0], len_time):
-            data.append(df[i:i + len_time].values)
-        data = np.array(data, dtype=np.float16)  # (len(self.geo_ids), len_time, feature_dim)
-        data = data.swapaxes(0, 1)  # (len_time, len(self.geo_ids), feature_dim)
+        for i in range(0, num_nodes * len_time, len_time):
+            node_data = df[i:i + len_time].values
+            if len(node_data) != len_time:
+                raise ValueError(f"节点{i // len_time}的数据行数不足，期望{len_time}，实际{len(node_data)}。")
+            data.append(node_data)
+        data = np.array(data, dtype=np.float)  # (num_nodes, len_time, feature_dim)
+        data = data.swapaxes(0, 1)  # (len_time, num_nodes, feature_dim)
         self._logger.info("Loaded file " + filename + '.dyna' + ', shape=' + str(data.shape))
         return data
 
@@ -326,7 +337,7 @@ class TrafficStateDataset(AbstractDataset):
         data = []
         for i in range(0, df.shape[0], len_time):
             data.append(df[i:i + len_time].values)
-        data = np.array(data, dtype=np.float16)  # (len(self.geo_ids), len_time, feature_dim)
+        data = np.array(data, dtype=np.float)  # (len(self.geo_ids), len_time, feature_dim)
         data = data.swapaxes(0, 1)  # (len_time, len(self.geo_ids), feature_dim)
         self._logger.info("Loaded file " + filename + '.grid' + ', shape=' + str(data.shape))
         return data
