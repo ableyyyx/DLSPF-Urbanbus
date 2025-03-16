@@ -39,6 +39,7 @@ from libcity.model.traffic_flow_prediction.ASTGNN import ASTGNN
 from libcity.model.traffic_flow_prediction.ASTGNNCommon import ASTGNNCommon
 from libcity.model.traffic_flow_prediction.FreTS import FreTS
 from libcity.model.traffic_flow_prediction.STSANet import STSANet
+from libcity.model.traffic_flow_prediction.LinkGCRN import LinkGCRN
 
 __all__ = [
     "FreTS",
@@ -81,5 +82,6 @@ __all__ = [
     "STGNCDE",
     "ASTGNN",
     "ASTGNNCommon",
-    "STSANet"
+    "STSANet",
+    "LinkGCRN"
 ]

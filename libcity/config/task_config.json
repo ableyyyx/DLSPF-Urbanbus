@@ -178,7 +178,8 @@
             "ASTGNN",
             "ASTGNNCommon",
             "FreTS",
-            "STSANet"
+            "STSANet",
+            "LinkGCRN"
         ],
         "allowed_dataset": [
             "METR_LA",
@@ -224,6 +225,11 @@
             "URBAN_BUS_ROUTE"
         ],
         "STSANet": {
+            "dataset_class": "TrafficStatePointDataset",
+            "executor": "TrafficStateExecutor",
+            "evaluator": "TrafficStateEvaluator"
+        },
+        "LinkGCRN": {
             "dataset_class": "TrafficStatePointDataset",
             "executor": "TrafficStateExecutor",
             "evaluator": "TrafficStateEvaluator"
