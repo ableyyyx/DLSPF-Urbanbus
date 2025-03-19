@@ -119,10 +119,13 @@ class LinkGCRN(AbstractTrafficStateModel):
 
     def __init__(self, config, data_feature):
         super().__init__(config, data_feature)
+
+        self._scaler = self.data_feature.get('scaler')
         self.device = config.get('device', torch.device('cpu'))
         self.num_nodes = data_feature['num_nodes']  # Number of routes
         self.feature_dim = data_feature['feature_dim']
         self.output_dim = data_feature['output_dim']
+
 
         # Static graph data (precomputed by the data processing module), registered as buffers for device migration.
         self.register_buffer('A_dist', self._init_adj(data_feature.get('A_distance')))

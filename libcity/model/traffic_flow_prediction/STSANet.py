@@ -177,6 +177,8 @@ class STSANet(AbstractTrafficStateModel):
 
     def __init__(self, config, data_feature):
         super().__init__(config, data_feature)
+
+        self._scaler = self.data_feature.get('scaler')
         self.device = config.get('device', torch.device('cpu'))
         self.num_nodes = data_feature['num_nodes']
         self.feature_dim = data_feature['feature_dim']
