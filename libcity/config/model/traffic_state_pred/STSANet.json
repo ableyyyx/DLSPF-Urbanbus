@@ -1,8 +1,5 @@
 {
-  "init_alpha": 0.33,
-  "init_beta": 0.33,
-  "route_specific_dim": 64,
-  "n_heads": 4,
+  "top_k": 20,
 
   "scaler": "standard",
   "load_external": false,
@@ -11,7 +8,7 @@
   "add_time_in_day": false,
   "add_day_in_week": false,
 
-  "max_epoch": 50,
+  "max_epoch": 100,
   "learner": "adam",
   "learning_rate": 0.003,
   "weight_decay": 1e-4,
@@ -23,4 +20,5 @@
   "max_grad_norm": 5.0,
   "use_early_stop": true,
   "patience": 30
+
 }
