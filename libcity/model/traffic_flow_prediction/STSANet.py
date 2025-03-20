@@ -211,8 +211,7 @@ class STSANet(AbstractTrafficStateModel):
         h_time = self.multi_scale_tc(x)
         # Fuse spatial information using multi-scale graph convolution, output: [B, T, N, output_dim]
         h_space = self.multi_scale_gc(h_time, A)
-        # Use the features from the last time step as prediction
-        return h_space[:, -1:, :, :]
+        return h_space
 
     def calculate_loss(self, batch):
         y_true = batch['y']

@@ -184,8 +184,7 @@ class LinkGCRN(AbstractTrafficStateModel):
         h = F.relu(self.route_conv(x, A_final))
         # Fuse temporal and spatial features using the ST-SA module (using predefined neighbor information).
         h_attn = self.sts_attn(h, self.route_neighbors)
-        # Use the features from the last time step for prediction.
-        out = self.fc(h_attn[:, -1:, :, :])
+        out = self.fc(h_attn)
         return out
 
     def calculate_loss(self, batch):
