@@ -230,8 +230,8 @@
             "evaluator": "TrafficStateEvaluator"
         },
         "LinkGCRN": {
-            "dataset_class": "TrafficStatePointDataset",
-            "executor": "TrafficStateExecutor",
+            "dataset_class": "LinkGCRNDataset",
+            "executor": "MultiTaskContrastiveExecutor",
             "evaluator": "TrafficStateEvaluator"
         },
         "FreTS": {
