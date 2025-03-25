@@ -35,7 +35,6 @@ class LineAGC(nn.Module):
 
     def __init__(self, in_dim, out_dim, num_nodes):
         super().__init__()
-        # Define independent convolution parameters for each route.
         self.route_weights = nn.Parameter(torch.randn(num_nodes, in_dim, out_dim))
         self.route_bias = nn.Parameter(torch.randn(1, num_nodes, out_dim))
 
@@ -46,15 +45,11 @@ class LineAGC(nn.Module):
         Output: [B, T, M, out_dim]
         """
         B, T, M, _ = x.shape
-        # Merge the time dimension for neighborhood aggregation.
-        x_reshaped = x.view(B * T, M, -1)  # [B*T, M, in_dim]
-        # Expand the adjacency matrix to each time step.
-        adj_expanded = adj.repeat_interleave(T, dim=0)  # [B*T, M, M]
-        # Neighborhood aggregation.
-        h = torch.bmm(adj_expanded, x_reshaped)  # [B*T, M, in_dim]
-        # Use independent weights for each route via einsum: [B*T, M, in_dim] x [M, in_dim, out_dim]
+        x_reshaped = x.view(B * T, M, -1)
+        adj_expanded = adj.repeat_interleave(T, dim=0)
+        h = torch.bmm(adj_expanded, x_reshaped)
         h_trans = torch.einsum('bmd,mdl->bml', h, self.route_weights)
-        h_out = h_trans + self.route_bias  # Add bias via broadcasting
+        h_out = h_trans + self.route_bias
         h_out = F.relu(h_out)
         return h_out.view(B, T, M, -1)
 
@@ -80,71 +75,77 @@ class STSA(nn.Module):
         Output: Fused features with temporal and spatial information, [B, T, M, d_model]
         """
         B, T, M, D = x.shape
-        # Temporal self-attention: merge the route and batch dimensions.
-        x_time = x.permute(1, 0, 2, 3).reshape(T, B * M, D)  # [T, B*M, D]
+        x_time = x.permute(1, 0, 2, 3).reshape(T, B * M, D)
         t_out, _ = self.temporal_attn(x_time, x_time, x_time)
-        t_out = t_out.reshape(T, B, M, D).permute(1, 0, 2, 3)  # [B, T, M, D]
-
-        # Cross-route spatial attention: for each route, interact with its neighbors.
+        t_out = t_out.reshape(T, B, M, D).permute(1, 0, 2, 3)
         s_out_list = []
         for m in range(M):
             neighbors = route_neighbors[m]
             if len(neighbors) == 0:
-                # If no neighbors, use the route's own features.
                 s_out_list.append(x[:, :, m, :])
             else:
-                # Use the target route's features as query: [B, T, D]
-                q = x[:, :, m, :].permute(1, 0, 2)  # [T, B, D]
-                # Concatenate neighbor features as key and value: [T, B*len(neighbors), D]
+                q = x[:, :, m, :].permute(1, 0, 2)
                 k = x[:, :, neighbors, :].permute(1, 0, 2, 3).reshape(T, B * len(neighbors), D)
                 v = k
                 s_out, _ = self.spatial_attn(q, k, v)
-                s_out_list.append(s_out.transpose(0, 1))  # [B, T, D]
-        # Stack the spatial attention results to get [B, T, M, D]
+                s_out_list.append(s_out.transpose(0, 1))
         s_out = torch.stack(s_out_list, dim=2)
-        # Fuse temporal and spatial information (addition)
         return t_out + s_out
 
 
 class LinkGCRN(AbstractTrafficStateModel):
     """
-    LinkGCRN Model
-    Designed for route-level traffic flow prediction, it includes:
-      - Multi-Graph Fusion Module (MGF)
-      - Parameter-Adaptive Graph Convolution (Line-AGC)
-      - Spatio-Temporal Self-Attention Module (ST-SA)
-    Input: [B, T, M, D]
-    Output: [B, 1, M, output_dim]
+    LinkGCRN Model with optional STSANet prior injection.
+    当 use_stsanet_prior=True 时，将加载预训练的 STSANet 模型，
+    利用其站点级预测作为先验，通过 route_station_mapping 聚合为线路级先验，并与原有特征融合。
     """
 
     def __init__(self, config, data_feature):
         super().__init__(config, data_feature)
-
         self._scaler = self.data_feature.get('scaler')
         self.device = config.get('device', torch.device('cpu'))
-        self.num_nodes = data_feature['num_nodes']  # Number of routes
+        self.num_nodes = data_feature['num_nodes']      # 线路数：308
         self.feature_dim = data_feature['feature_dim']
         self.output_dim = data_feature['output_dim']
 
-
-        # Static graph data (precomputed by the data processing module), registered as buffers for device migration.
+        # Static graph data
         self.register_buffer('A_dist', self._init_adj(data_feature.get('A_distance')))
         self.register_buffer('A_trans', self._init_adj(data_feature.get('A_transfer')))
         self.register_buffer('A_dyn', self._init_adj(data_feature.get('A_dynamic')))
-
-        # Neighbor relationships: if provided in data_feature, use them; otherwise, generate based on A_dist.
         self.route_neighbors = self._init_neighbors(data_feature)
 
-        # Module definitions.
+        # Module definitions
         self.graph_fusion = MultiGraphFusion(init_alpha=0.33, init_beta=0.33)
         self.route_conv = LineAGC(self.feature_dim, 64, self.num_nodes)
         self.sts_attn = STSA(64, n_heads=4)
         self.fc = nn.Linear(64, self.output_dim)
 
+        # 联合训练开关：是否启用 STSANet 先验注入
+        self.use_stsanet_prior = config.get('use_stsanet_prior', False)
+        if self.use_stsanet_prior:
+            stsanet_path = config.get('stsanet_path', None)
+            if stsanet_path is None:
+                raise ValueError("联合训练模式下必须提供 'stsanet_path'")
+            if 'num_stations' not in data_feature:
+                raise ValueError("联合训练模式下需要在 data_feature 中提供 'num_stations'（站点数量）")
+            # 构造一个新的 data_feature，用于 STSANet，num_nodes 设为站点数量（例如4401）
+            station_data_feature = data_feature.copy()
+            station_data_feature['num_nodes'] = data_feature['num_stations']
+            from libcity.model.traffic_flow_prediction.STSANet import STSANet
+            self.stsanet = STSANet(config, station_data_feature).to(self.device)
+            stsanet_state = torch.load(stsanet_path, map_location=self.device)
+            if isinstance(stsanet_state, tuple):
+                stsanet_state = stsanet_state[0]
+            self.stsanet.load_state_dict(stsanet_state)
+            self.stsanet.eval()
+            for param in self.stsanet.parameters():
+                param.requires_grad = False
+            stsanet_out_dim = data_feature.get('stsanet_output_dim', self.output_dim)
+            self.prior_transform = nn.Linear(stsanet_out_dim, 64)
+            if 'route_station_mapping' not in data_feature:
+                raise ValueError("联合训练模式下需要在 data_feature 中提供 'route_station_mapping'")
+
     def _init_adj(self, adj):
-        """
-        Initialize the adjacency matrix. Supports numpy arrays or directly passed tensors.
-        """
         if adj is None:
             return torch.eye(self.num_nodes, device=self.device)
         if isinstance(adj, np.ndarray):
@@ -152,13 +153,8 @@ class LinkGCRN(AbstractTrafficStateModel):
         return adj.to(self.device)
 
     def _init_neighbors(self, data_feature):
-        """
-        Initialize neighbor relationships for each route.
-        If not provided, automatically generate based on A_dist.
-        """
         if 'route_neighbors' in data_feature:
             return data_feature['route_neighbors']
-        # Simple strategy: for each route, select indices where the value is greater than the row mean.
         A_dist_np = self.A_dist.cpu().numpy()
         neighbors = []
         for row in A_dist_np:
@@ -168,21 +164,34 @@ class LinkGCRN(AbstractTrafficStateModel):
 
     def forward(self, batch):
         """
-        batch['X']: [B, T, M, D]
-        Output: [B, 1, M, output_dim]
+        输入 batch 中 'X' 为 (B, T, M, D)，标准线路数据。
+        利用预训练 STSANet 模型和 data_feature 中传入的 route_station_mapping，
+        直接生成站点级先验，不依赖 X_ext。
         """
-        # Move input to device.
-        x = batch['X']
+        x = batch['X']  # (B, T, M, D)
         B, T, M, _ = x.shape
-        # Expand static adjacency matrices to batch dimension.
         A_dist_batch = self.A_dist.unsqueeze(0).repeat(B, 1, 1)
         A_trans_batch = self.A_trans.unsqueeze(0).repeat(B, 1, 1)
         A_dyn_batch = self.A_dyn.unsqueeze(0).repeat(B, 1, 1)
-        # Fuse the graphs to get the final adjacency matrix.
         A_final = self.graph_fusion(A_dist_batch, A_trans_batch, A_dyn_batch)
-        # Apply route-level convolution.
-        h = F.relu(self.route_conv(x, A_final))
-        # Fuse temporal and spatial features using the ST-SA module (using predefined neighbor information).
+        h = F.relu(self.route_conv(x, A_final))  # [B, T, M, 64]
+
+        if self.use_stsanet_prior:
+            # 构造一个全零的 dummy 输入，形状为 (B, T, num_stations, D_station)
+            D_station = getattr(self.stsanet, 'input_dim', self.output_dim)
+            dummy = torch.zeros(B, T, self.data_feature['num_stations'], D_station, device=self.device)
+            with torch.no_grad():
+                stsanet_pred = self.stsanet({'X': dummy})
+            # 根据 route_station_mapping 聚合站点预测为线路先验
+            mapping = self.data_feature.get('route_station_mapping')
+            route_prior_list = []
+            for route in mapping:
+                # 对每条线路，将对应站点特征取均值，得到 (B, T, stsanet_out_dim)
+                route_feat = stsanet_pred[:, :, route, :].mean(dim=2)
+                route_prior_list.append(route_feat)
+            route_prior = torch.stack(route_prior_list, dim=2)  # (B, T, M, stsanet_out_dim)
+            route_prior = self.prior_transform(route_prior)      # (B, T, M, 64)
+            h = h + route_prior
         h_attn = self.sts_attn(h, self.route_neighbors)
         out = self.fc(h_attn)
         return out

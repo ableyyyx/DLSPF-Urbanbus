@@ -4,5 +4,9 @@
     "num_workers": 0,
     "input_window": 4,
     "output_window": 4,
-    "gpu_id": 0
+    "gpu_id": 0,
+    "patience": 10,
+    "use_stsanet_prior": true,
+    "stsanet_path": "./libcity/cache/70254/model_cache/STSANet_URBAN_BUS.m"
+
 }
