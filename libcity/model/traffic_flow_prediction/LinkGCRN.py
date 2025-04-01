@@ -93,13 +93,52 @@ class STSA(nn.Module):
         return t_out + s_out
 
 
+class PriorFusion(nn.Module):
+    """
+    将全局特征与经过深层 MLP 映射后的站点先验特征进行动态融合，
+    融合公式为：
+       h_fused = g ⊙ h + (1 - g) ⊙ T(F_route_prior)
+    其中 g = sigmoid(W_g([h; T(F_route_prior)]) + b_g)
+    """
+    def __init__(self, station_dim, global_dim, hidden_dim=128):
+        """
+        station_dim: STSANet 输出的维度
+        global_dim: 全局特征维度（例如 64）
+        hidden_dim: 融合模块内部隐藏层维度
+        """
+        super().__init__()
+        # 深层映射 station 特征至 global 维度
+        self.station_mlp = nn.Sequential(
+            nn.Linear(station_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, global_dim)
+        )
+        # 门控机制，输入为全局特征和映射后的 station 特征拼接
+        self.gate = nn.Sequential(
+            nn.Linear(global_dim * 2, global_dim),
+            nn.Sigmoid()
+        )
+
+    def forward(self, h, route_prior):
+        """
+        h: [B, T, M, global_dim]
+        route_prior: [B, T, M, station_dim]
+        """
+        # 将站点先验映射到全局特征维度
+        route_mapped = self.station_mlp(route_prior)
+        fusion_input = torch.cat([h, route_mapped], dim=-1)
+        gate_weight = self.gate(fusion_input)
+        h_fused = gate_weight * h + (1 - gate_weight) * route_mapped
+        return h_fused
+
+
 class LinkGCRN(AbstractTrafficStateModel):
     """
     LinkGCRN Model with optional STSANet prior injection.
     当 use_stsanet_prior=True 时，将加载预训练的 STSANet 模型，
-    利用其站点级预测作为先验，通过 route_station_mapping 聚合为线路级先验，并与原有特征融合。
+    利用其站点级预测作为先验，通过 route_station_mapping 聚合为线路级先验，
+    并与全局特征采用门控融合进行动态融合。
     """
-
     def __init__(self, config, data_feature):
         super().__init__(config, data_feature)
         self._scaler = self.data_feature.get('scaler')
@@ -140,8 +179,10 @@ class LinkGCRN(AbstractTrafficStateModel):
             self.stsanet.eval()
             for param in self.stsanet.parameters():
                 param.requires_grad = False
+            # 获取 STSANet 输出的维度
             stsanet_out_dim = data_feature.get('stsanet_output_dim', self.output_dim)
-            self.prior_transform = nn.Linear(stsanet_out_dim, 64)
+            # 使用新的 PriorFusion 模块代替单层线性映射
+            self.prior_fusion = PriorFusion(station_dim=stsanet_out_dim, global_dim=64, hidden_dim=128)
             if 'route_station_mapping' not in data_feature:
                 raise ValueError("联合训练模式下需要在 data_feature 中提供 'route_station_mapping'")
 
@@ -166,7 +207,7 @@ class LinkGCRN(AbstractTrafficStateModel):
         """
         输入 batch 中 'X' 为 (B, T, M, D)，标准线路数据。
         利用预训练 STSANet 模型和 data_feature 中传入的 route_station_mapping，
-        直接生成站点级先验，不依赖 X_ext。
+        生成站点级先验并经过 PriorFusion 模块与全局特征融合。
         """
         x = batch['X']  # (B, T, M, D)
         B, T, M, _ = x.shape
@@ -189,9 +230,11 @@ class LinkGCRN(AbstractTrafficStateModel):
                 # 对每条线路，将对应站点特征取均值，得到 (B, T, stsanet_out_dim)
                 route_feat = stsanet_pred[:, :, route, :].mean(dim=2)
                 route_prior_list.append(route_feat)
-            route_prior = torch.stack(route_prior_list, dim=2)  # (B, T, M, stsanet_out_dim)
-            route_prior = self.prior_transform(route_prior)      # (B, T, M, 64)
-            h = h + route_prior
+            # route_prior: [B, T, M, stsanet_out_dim]
+            route_prior = torch.stack(route_prior_list, dim=2)
+            # 使用 PriorFusion 模块动态融合全局特征 h 与 station 先验 route_prior
+            h = self.prior_fusion(h, route_prior)
+
         h_attn = self.sts_attn(h, self.route_neighbors)
         out = self.fc(h_attn)
         return out
