@@ -231,7 +231,7 @@
         },
         "LinkGCRN": {
             "dataset_class": "LinkGCRNDataset",
-            "executor": "MultiTaskContrastiveExecutor",
+            "executor": "TrafficStateExecutor",
             "evaluator": "TrafficStateEvaluator"
         },
         "FreTS": {
